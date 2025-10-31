@@ -152,7 +152,7 @@ export const PlayerSpot = ({
                   <div
                     key={card.id ?? `${player.id}-card-${index}`}
                     className={cn('transition-transform', index > 0 && '-ml-5')}
-                    style={{ zIndex: renderedHand.length - index }}
+                    style={{ zIndex: index + 1 }}
                   >
                     <Card card={card} size="sm" faceUp={card.suit !== '??'} />
                   </div>
