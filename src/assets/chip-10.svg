@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <defs>
+    <linearGradient id="chip10-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff6666"/>
+      <stop offset="100%" stop-color="#b30000"/>
+    </linearGradient>
+  </defs>
+  <circle cx="60" cy="60" r="58" fill="url(#chip10-bg)" stroke="#ffffff" stroke-width="4"/>
+  <circle cx="60" cy="60" r="44" fill="none" stroke="#fff4f4" stroke-opacity="0.6" stroke-width="6" stroke-dasharray="14 14" stroke-linecap="round"/>
+  <circle cx="60" cy="60" r="30" fill="#fff8f8"/>
+  <text x="60" y="72" font-family="'Orbitron', 'Montserrat', sans-serif" font-size="36" font-weight="700" text-anchor="middle" fill="#b30000">10</text>
+</svg>
