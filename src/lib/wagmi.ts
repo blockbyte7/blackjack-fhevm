@@ -9,11 +9,11 @@ const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
 const walletConnectMetadata = {
   name: 'CipherJack Blackjack',
   description: 'Encrypted blackjack powered by FHEVM.',
-  url: 'https://cipherjack.app',
-  icons: ['https://cipherjack.app/icon.png'],
+  url: 'https://cipherjack.xyz',
+  icons: ['https://cipherjack.xyz/assets/cipherjack-logo-DyVLB6l4.jpeg'],
   redirect: {
     native: 'cipherjack://',
-    universal: 'https://cipherjack.app'
+    universal: 'https://cipherjack.xyz'
   }
 } as const;
 
@@ -29,64 +29,7 @@ export const walletConnectConnector = walletConnectProjectId
       qrModalOptions: {
         themeMode: 'dark',
         enableExplorer: true,
-        explorerRecommendedWalletIds: [
-          'eip155:1:rainbow',
-          'eip155:1:zerion',
-          'eip155:1:coinbase',
-          'eip155:1:metamask'
-        ],
-        mobileWallets: [
-          {
-            id: 'rainbow',
-            name: 'Rainbow',
-            links: {
-              native: 'rainbow://wc',
-              universal: 'https://rnbwapp.com/wc'
-            }
-          },
-          {
-            id: 'zerion',
-            name: 'Zerion',
-            links: {
-              native: 'zerion://wc',
-              universal: 'https://wallet.zerion.io/wallet-connect'
-            }
-          },
-          {
-            id: 'metamask',
-            name: 'MetaMask',
-            links: {
-              native: 'metamask://',
-              universal: 'https://metamask.app.link'
-            }
-          },
-          {
-            id: 'coinbase',
-            name: 'Coinbase Wallet',
-            links: {
-              native: 'cbwallet://wc',
-              universal: 'https://wallet.coinbase.com/wallet-connect'
-            }
-          }
-        ],
-        desktopWallets: [
-          {
-            id: 'metamask',
-            name: 'MetaMask',
-            links: {
-              native: 'metamask://',
-              universal: 'https://metamask.io/download/'
-            }
-          },
-          {
-            id: 'zerion',
-            name: 'Zerion',
-            links: {
-              native: 'zerion://wc',
-              universal: 'https://wallet.zerion.io/wallet-connect'
-            }
-          }
-        ]
+        explorerRecommendedWalletIds: 'NONE'
       }
     })
   : null;

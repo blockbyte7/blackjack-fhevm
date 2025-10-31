@@ -74,6 +74,15 @@ export const WalletControls = ({ panel }: WalletControlsProps) => {
     return map;
   }, [connectors]);
 
+  useEffect(() => {
+    const entries = Array.from(connectorMap.values()).map((connector) => ({
+      id: connector.id,
+      name: connector.name,
+      ready: connector.ready
+    }));
+    console.info('[WalletControls] available connectors', entries);
+  }, [connectorMap]);
+
   const orderedConnectors = useMemo(() => {
     const list = Array.from(connectorMap.values());
     list.sort((a, b) => {
