@@ -13,6 +13,7 @@ import {
   useSwitchChain
 } from 'wagmi';
 import { sepolia } from 'wagmi/chains';
+import { hasWalletConnect, walletConnectConnector } from '@/lib/wagmi';
 
 export interface WalletPanelConfig {
   walletBalance: string;
@@ -60,29 +61,59 @@ export const WalletControls = ({ panel }: WalletControlsProps) => {
 
   const isConnected = accountStatus === 'connected';
   const isOnSepolia = chain?.id === sepolia.id;
-  const primaryConnector = useMemo(
-    () => connectors.find((connector) => connector.ready) ?? connectors[0],
-    [connectors]
-  );
+  const connectorMap = useMemo(() => {
+    const map = new Map<string, (typeof connectors)[number]>();
+    connectors.forEach((connector) => {
+      if (connector?.id) {
+        map.set(connector.id, connector);
+      }
+    });
+    if (hasWalletConnect && walletConnectConnector && !map.has(walletConnectConnector.id)) {
+      map.set(walletConnectConnector.id, walletConnectConnector);
+    }
+    return map;
+  }, [connectors]);
+
+  const orderedConnectors = useMemo(() => {
+    const list = Array.from(connectorMap.values());
+    list.sort((a, b) => {
+      if (a.id === b.id) return 0;
+      if (a.id === 'walletConnect') return -1;
+      if (b.id === 'walletConnect') return 1;
+      if (a.id === 'injected' && b.id !== 'injected') return 1;
+      if (b.id === 'injected' && a.id !== 'injected') return -1;
+      return a.name.localeCompare(b.name);
+    });
+    return list;
+  }, [connectorMap]);
 
   const disablePanelActions = Boolean(panel?.pending || isClaiming);
 
   const handleConnect = useCallback((connectorId?: string) => {
-    const connector = connectorId
-      ? connectors.find((item) => item.id === connectorId)
-      : primaryConnector;
+    const selected = connectorId
+      ? connectorMap.get(connectorId)
+      : orderedConnectors[0];
 
-    if (!connector) {
+    if (!selected) {
       toast({
         title: 'No wallet connector available',
-        description: 'Install a browser wallet like MetaMask to connect.',
+        description: 'Install a browser wallet like MetaMask or use WalletConnect to continue.',
         variant: 'destructive'
       });
       return;
     }
 
-    connect({ connector });
-  }, [connect, connectors, primaryConnector, toast]);
+    if (selected.id === 'injected' && !selected.ready) {
+      toast({
+        title: 'No browser wallet detected',
+        description: 'Install MetaMask or choose WalletConnect to link a mobile wallet.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    connect({ connector: selected });
+  }, [connect, connectorMap, orderedConnectors, toast]);
 
   const handleDisconnect = useCallback(() => {
     disconnect();
@@ -142,6 +173,9 @@ export const WalletControls = ({ panel }: WalletControlsProps) => {
   }, [chain?.name, isConnected, isOnSepolia, switchChain]);
 
   const triggerLabel = isConnected ? formatAddress(address) : 'Connect Wallet';
+  const showInjectedWarning = orderedConnectors.some(
+    (connector) => connector.id === 'injected' && !connector.ready
+  );
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -289,18 +323,22 @@ export const WalletControls = ({ panel }: WalletControlsProps) => {
               </p>
             </div>
             <div className="grid gap-2">
-              {connectors.map((connector) => (
+              {orderedConnectors.map((connector) => (
                 <Button
                   key={connector.id}
                   onClick={() => handleConnect(connector.id)}
-                  disabled={isConnectPending || connector.id === undefined}
+                  disabled={
+                    isConnectPending ||
+                    connector.id === undefined ||
+                    (connector.id === 'injected' && !connector.ready)
+                  }
                   className="justify-start gap-3 rounded-xl border border-white/15 bg-white/5 text-white hover:bg-white/10"
                 >
                   {isConnectPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
                   {connector.name}
                 </Button>
               ))}
-              {!connectors.length && (
+              {!orderedConnectors.length && (
                 <Button
                   onClick={() => handleConnect()}
                   disabled={isConnectPending}
@@ -311,6 +349,11 @@ export const WalletControls = ({ panel }: WalletControlsProps) => {
                 </Button>
               )}
             </div>
+            {showInjectedWarning && (
+              <p className="text-xs text-amber-300/80">
+                No injected browser wallet detected. Use WalletConnect to pair a mobile wallet.
+              </p>
+            )}
             {connectError && (
               <p className="text-xs text-red-400">
                 {connectError.shortMessage || connectError.message}
