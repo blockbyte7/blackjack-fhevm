@@ -882,14 +882,27 @@ export const useBlackjackGame = (
   ]);
 
   useEffect(() => {
-    if (
-      playerDecryptedHand &&
-      playerDecryptedHand.cards.length > 0 &&
-      playerDecryptState !== 'success'
-    ) {
+    if (!baseGameState) {
+      return;
+    }
+
+    const player = lowerWalletAddress
+      ? baseGameState.players.find((entry) => toLower(entry.address) === lowerWalletAddress)
+      : undefined;
+    const expectedCardCount = player?.hand.length ?? 0;
+    const decryptedCount = playerDecryptedHand?.cards.length ?? 0;
+
+    if (expectedCardCount === 0) {
+      if (playerDecryptState !== 'idle') {
+        setPlayerDecryptState('idle');
+      }
+      return;
+    }
+
+    if (decryptedCount >= expectedCardCount && playerDecryptState !== 'success') {
       setPlayerDecryptState('success');
     }
-  }, [playerDecryptedHand, playerDecryptState]);
+  }, [baseGameState, lowerWalletAddress, playerDecryptedHand, playerDecryptState]);
 
   useEffect(() => {
     if (table) {
@@ -901,6 +914,63 @@ export const useBlackjackGame = (
       });
     }
   }, [table, tableId, latestResultTimestamp]);
+
+  useEffect(() => {
+    if (!baseGameState || !lowerWalletAddress) return;
+    const player = baseGameState.players.find(
+      (entry) => toLower(entry.address) === lowerWalletAddress
+    );
+    if (!player) {
+      if (connectedDecryptedHandState) {
+        setConnectedDecryptedHandState(undefined);
+      }
+      playerDecryptInFlightRef.current = null;
+      failedPlayerHandSignatureRef.current = null;
+      lastPlayerHandSignatureRef.current = '0';
+      lastPlayerAttemptedSignatureRef.current = '0';
+      return;
+    }
+
+    const expectedCardCount = player.hand.length;
+    if (expectedCardCount === 0) {
+      if (connectedDecryptedHandState) {
+        setConnectedDecryptedHandState(undefined);
+      }
+      playerDecryptInFlightRef.current = null;
+      failedPlayerHandSignatureRef.current = null;
+      lastPlayerHandSignatureRef.current = '0';
+      lastPlayerAttemptedSignatureRef.current = '0';
+      return;
+    }
+
+    const lower = lowerWalletAddress;
+    const storedRecord = lower ? decryptedHands[lower] : undefined;
+    const resolvedCount =
+      connectedDecryptedHandState?.cards.length ??
+      playerDecryptedHand?.cards.length ??
+      storedRecord?.cards.length ??
+      0;
+
+    if (resolvedCount < expectedCardCount) {
+      if (connectedDecryptedHandState) {
+        setConnectedDecryptedHandState(undefined);
+      }
+      playerDecryptInFlightRef.current = null;
+      failedPlayerHandSignatureRef.current = null;
+      lastPlayerHandSignatureRef.current = '0';
+      lastPlayerAttemptedSignatureRef.current = '0';
+      if (playerDecryptState !== 'pending') {
+        setPlayerDecryptState('pending');
+      }
+    }
+  }, [
+    baseGameState,
+    connectedDecryptedHandState,
+    decryptedHands,
+    lowerWalletAddress,
+    playerDecryptedHand,
+    playerDecryptState
+  ]);
 
   const decoratedGameState = useMemo(() => {
     if (!baseGameState) return undefined;
@@ -916,7 +986,6 @@ export const useBlackjackGame = (
           : undefined;
 
       const baseHandLength = player.hand.length;
-      const decryptedCount = decryptedSource ? decryptedSource.cards.length : 0;
       let displayHand: Card[] = player.displayHand;
       let displayTotal: number | null = player.displayTotal;
       let cardsRevealed = player.cardsRevealed;
@@ -926,13 +995,15 @@ export const useBlackjackGame = (
         displayTotal = showdown.total;
         cardsRevealed = true;
       } else if (decryptedSource) {
-        const combined = decryptedSource.cards.map((card) => ({ ...card }));
+        const combined = decryptedSource.cards.slice(0, baseHandLength).map((card) => ({ ...card }));
+        const hasFullDecrypt =
+          baseHandLength > 0 && decryptedSource.cards.length >= baseHandLength;
         for (let index = combined.length; index < baseHandLength; index++) {
           combined.push(toHiddenCard(index, player.id));
         }
         displayHand = combined;
-        displayTotal = decryptedSource.total;
-        cardsRevealed = true;
+        displayTotal = hasFullDecrypt ? decryptedSource.total : null;
+        cardsRevealed = hasFullDecrypt;
       } else {
         displayHand = player.hand.map((_, index) => toHiddenCard(index, player.id));
         displayTotal = null;
