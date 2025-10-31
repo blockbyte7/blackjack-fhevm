@@ -5,7 +5,8 @@ import {
   usePublicClient,
   useReadContract,
   useWatchContractEvent,
-  useWriteContract
+  useWriteContract,
+  useWalletClient
 } from 'wagmi';
 import { blackjackContract } from '@/lib/contracts';
 import { blackjackAbi } from '@/lib/blackjackAbi';
@@ -96,6 +97,7 @@ export const useBlackjackGame = (
 ): BlackjackGameData => {
   const { address: walletAddress } = useAccount();
   const publicClient = usePublicClient();
+  const { data: walletClient } = useWalletClient();
   const { writeContractAsync, isPending } = useWriteContract();
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [winners, setWinners] = useState<WinnerEventPayload | null>(null);
@@ -552,8 +554,36 @@ export const useBlackjackGame = (
       let scheduledHandleRetry = false;
       try {
         const fhe = await ensureFhevmInstance();
-        const provider = await getBrowserProvider();
-        const signature = await loadOrCreateSignature(fhe, contractAddress as `0x${string}`, provider);
+
+        const signingContext = await (async () => {
+          try {
+            const browserProvider = await getBrowserProvider();
+            return { browserProvider };
+          } catch (error) {
+            if (walletClient) {
+              return { walletClient };
+            }
+            return null;
+          }
+        })();
+
+        if (!signingContext) {
+          console.info('[BlackjackGame] Waiting for wallet provider to authorise decryption');
+          scheduledHandleRetry = true;
+          playerDecryptInFlightRef.current = null;
+          retryTimer = setTimeout(() => {
+            if (!cancelled) {
+              run();
+            }
+          }, HANDLE_RETRY_DELAY_MS * (HANDLE_RETRY_LIMIT + 1));
+          return;
+        }
+
+        const signature = await loadOrCreateSignature(
+          fhe,
+          contractAddress as `0x${string}`,
+          signingContext
+        );
 
         const queries = [...rankHandles, ...suitHandles].map((handle) => ({
           handle: hexlifyHandle(handle),
@@ -683,6 +713,7 @@ export const useBlackjackGame = (
     lowerWalletAddress,
     contractAddress,
     publicClient,
+    walletClient,
     tableId,
     baseGameState,
     playerHandSignature,
