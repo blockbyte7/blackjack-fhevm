@@ -1,6 +1,6 @@
 import { Player } from '@/types/blackjack';
 import { Card } from './Card';
-import { calculateHandValue } from '@/utils/contractMapping';
+import { calculateHandValue, toHiddenCard } from '@/utils/contractMapping';
 import playerAvatar from '@/assets/player-ghost.png';
 import { cn } from '@/lib/utils';
 import { ChipStack, ChipMotion } from './ChipStack';
@@ -19,6 +19,8 @@ interface PlayerSpotProps {
   dealerWins?: boolean;
   decryptState?: PlayerDecryptState;
   onRetryDecrypt?: () => void;
+  isConnected?: boolean;
+  decryptedHand?: { cards: Card[]; total: number };
 }
 
 const resultStyles: Record<Exclude<Player['result'], null>, { label: string; className: string }> = {
@@ -39,7 +41,9 @@ export const PlayerSpot = ({
   isWinner = false,
   dealerWins = false,
   decryptState,
-  onRetryDecrypt
+  onRetryDecrypt,
+  isConnected = false,
+  decryptedHand
 }: PlayerSpotProps) => {
   if (!player) {
     return (
@@ -51,18 +55,47 @@ export const PlayerSpot = ({
     );
   }
 
-  const revealedTotal = player.cardsRevealed
-    ? player.displayTotal ?? calculateHandValue(player.hand)
+  const baseHandLength = player.hand.length;
+  let renderedHand = player.displayHand;
+  let renderedTotal = player.displayTotal;
+  let renderedCardsRevealed = player.cardsRevealed;
+
+  if (isConnected && decryptedHand) {
+    const cloned = decryptedHand.cards.map((card, index) => ({
+      ...card,
+      id: `${player.id}-decrypted-${index}-${card.id}`
+    }));
+    if (cloned.length >= baseHandLength) {
+      renderedHand = cloned;
+      renderedTotal = decryptedHand.total;
+      renderedCardsRevealed = true;
+    } else {
+      const padded = [...cloned];
+      for (let index = cloned.length; index < baseHandLength; index++) {
+        padded.push(toHiddenCard(index, `${player.id}-pending`));
+      }
+      renderedHand = padded;
+      renderedTotal = null;
+      renderedCardsRevealed = false;
+    }
+  }
+
+  const effectiveDecryptState = decryptedHand ? 'success' : decryptState;
+  const revealedTotal = renderedCardsRevealed
+    ? renderedTotal ?? calculateHandValue(renderedHand)
     : null;
   const totalDisplay = revealedTotal ?? '??';
-  const resultInfo = player.cardsRevealed && player.result ? resultStyles[player.result] : null;
-  const showDecryptNotice = decryptState && decryptState !== 'idle' && !player.cardsRevealed;
+  const resultInfo = renderedCardsRevealed && player.result ? resultStyles[player.result] : null;
+  const showDecryptNotice =
+    effectiveDecryptState && effectiveDecryptState !== 'idle' && !renderedCardsRevealed;
   const decryptText =
-    decryptState === 'pending'
+    effectiveDecryptState === 'pending'
       ? 'Decrypting…'
-      : decryptState === 'error'
+      : effectiveDecryptState === 'error'
         ? 'Decryption failed'
         : null;
+  const shouldRenderHand =
+    (showCards || renderedCardsRevealed || (isConnected && decryptedHand)) && renderedHand.length > 0;
 
   let chipMotion: ChipMotion = 'idle';
   if (roundActive && phase === 'player-turn') {
@@ -110,18 +143,18 @@ export const PlayerSpot = ({
         </div>
       )}
 
-      {showCards && player.displayHand.length > 0 && (
+      {shouldRenderHand && (
         <div className="flex w-full flex-col items-center gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-1 justify-center sm:justify-start">
             <div className="rounded-2xl border border-primary/20 bg-secondary/25 px-3 py-2 shadow-inner">
               <div className="flex items-center">
-                {player.displayHand.map((card, index) => (
+                {renderedHand.map((card, index) => (
                   <div
-                    key={card.id}
+                    key={card.id ?? `${player.id}-card-${index}`}
                     className={cn('transition-transform', index > 0 && '-ml-5')}
-                    style={{ zIndex: player.displayHand.length - index }}
+                    style={{ zIndex: renderedHand.length - index }}
                   >
-                    <Card card={card} size="sm" faceUp={player.cardsRevealed} />
+                    <Card card={card} size="sm" faceUp={card.suit !== '??'} />
                   </div>
                 ))}
               </div>
@@ -130,7 +163,7 @@ export const PlayerSpot = ({
          <div
            className={cn(
              'rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.35em] shadow',
-             player.cardsRevealed
+             renderedCardsRevealed
                ? player.bust
                  ? 'bg-rose-600/90 text-rose-50'
                  : player.blackjack
@@ -139,7 +172,7 @@ export const PlayerSpot = ({
                : 'bg-muted/60 text-muted-foreground/80'
            )}
          >
-           {player.cardsRevealed
+           {renderedCardsRevealed
              ? player.bust
                ? `Bust! (${totalDisplay})`
                : `Total ${totalDisplay}`
@@ -153,7 +186,7 @@ export const PlayerSpot = ({
           <div className="rounded-full border border-primary/30 bg-black/60 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.32em] text-primary/80">
             {decryptText}
           </div>
-          {decryptState === 'error' && onRetryDecrypt && (
+          {effectiveDecryptState === 'error' && onRetryDecrypt && (
             <button
               type="button"
               onClick={onRetryDecrypt}
@@ -166,7 +199,7 @@ export const PlayerSpot = ({
         </div>
       )}
 
-      {player.cardsRevealed && (player.bust || resultInfo) && (
+      {renderedCardsRevealed && (player.bust || resultInfo) && (
         <div
           className={cn(
             'absolute -top-3 left-1/2 -translate-x-1/2 rounded-full px-4 py-1 text-xs font-semibold uppercase tracking-widest shadow-lg',

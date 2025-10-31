@@ -74,14 +74,15 @@ export const BlackjackTable = ({ tableId }: BlackjackTableProps) => {
     isSeated,
     isPlayerTurn,
     isLoading,
-    awaitingNextHand,
-    showdownResult,
-    lastHandSummary,
-    playerTableId,
-    actions,
-    pendingAction,
-    playerDecryptState,
-    dealerDecryptState
+  awaitingNextHand,
+  showdownResult,
+  lastHandSummary,
+  playerTableId,
+  actions,
+  pendingAction,
+  playerDecryptState,
+  dealerDecryptState,
+  connectedDecryptedHand
   } = useBlackjackGame({ tableId });
 
   const [showLastResult, setShowLastResult] = useState(false);
@@ -498,6 +499,8 @@ export const BlackjackTable = ({ tableId }: BlackjackTableProps) => {
                             roundActive={roundActiveDisplay}
                             isWinner={winnersSet.has(player.address)}
                             dealerWins={overlayDealerWins}
+                            isConnected={isConnectedPlayerSpot}
+                            decryptedHand={isConnectedPlayerSpot ? connectedDecryptedHand : undefined}
                             decryptState={isConnectedPlayerSpot ? (playerDecryptState as PlayerDecryptState) : undefined}
                             onRetryDecrypt={isConnectedPlayerSpot ? actions.retryPlayerDecrypt : undefined}
                           />
