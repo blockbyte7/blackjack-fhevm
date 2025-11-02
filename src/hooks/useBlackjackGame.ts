@@ -36,6 +36,30 @@ const toLower = (value?: string | null) => value?.toLowerCase();
 
 const HANDLE_RETRY_LIMIT = 3;
 const HANDLE_RETRY_DELAY_MS = 250;
+const PLAYER_DECRYPT_RETRY_DELAY_MS = 20_000;
+const DEALER_DECRYPT_RETRY_DELAY_MS = 25_000;
+
+const messageFromError = (error: unknown): string => (
+  (error as { shortMessage?: string })?.shortMessage ??
+  (error as Error)?.message ??
+  (typeof error === 'string' ? error : '')
+);
+
+const isRateLimitError = (error: unknown): boolean => {
+  const message = messageFromError(error);
+  return typeof message === 'string' && /rate[\s-]?limit|too many requests|429/i.test(message);
+};
+
+const isAuthError = (error: unknown): boolean => {
+  const message = messageFromError(error);
+  return typeof message === 'string' && /unauthorized|authenticat|api key|forbidden|401/i.test(message);
+};
+
+const isNetworkLikeError = (error: unknown): boolean => {
+  const message = messageFromError(error).toLowerCase();
+  if (!message) return false;
+  return /fetch|network|timeout|offline|relayer|gateway|disconnect/i.test(message);
+};
 
 const sleep = (ms: number) => new Promise<void>((resolve) => {
   const id = setTimeout(() => {
@@ -102,7 +126,9 @@ export const useBlackjackGame = (
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [winners, setWinners] = useState<WinnerEventPayload | null>(null);
   const [acknowledgedResultTimestamp, setAcknowledgedResultTimestamp] = useState<number>(0);
-  const [decryptedHands, setDecryptedHands] = useState<Record<string, { cards: Card[]; total: number }>>({});
+  type CachedDecryptedHand = { cards: Card[]; total: number; signature: string };
+
+  const [decryptedHands, setDecryptedHands] = useState<Record<string, CachedDecryptedHand>>({});
   const [dealerPublicHand, setDealerPublicHand] = useState<{ cards: Card[]; total: number } | null>(null);
   const [playerDecryptState, setPlayerDecryptState] = useState<DecryptState>('idle');
   const [dealerDecryptState, setDealerDecryptState] = useState<DecryptState>('idle');
@@ -110,6 +136,8 @@ export const useBlackjackGame = (
   const dealerDecryptErrorRef = useRef<number | null>(null);
   const lastPlayerHandleSignatureRef = useRef<string | null>(null);
   const lastDealerHandleSignatureRef = useRef<string | null>(null);
+  const lastPlayerDecryptErrorAtRef = useRef<number>(0);
+  const lastDealerDecryptErrorAtRef = useRef<number>(0);
   const lastPlayerHandSignatureRef = useRef<string>('0');
   const lastPlayerAttemptedSignatureRef = useRef<string>('0');
   const failedPlayerHandSignatureRef = useRef<string | null>(null);
@@ -119,16 +147,20 @@ export const useBlackjackGame = (
   const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playerDecryptCacheRef = useRef(new Map<string, { cards: Card[]; total: number }>());
   const dealerDecryptCacheRef = useRef(new Map<string, { cards: Card[]; total: number }>());
-  const [connectedDecryptedHandState, setConnectedDecryptedHandState] = useState<{ cards: Card[]; total: number } | undefined>(undefined);
+  const playerDecryptRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dealerDecryptRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playerHandleCacheRef = useRef(new Map<string, { rank: `0x${string}`[]; suit: `0x${string}`[]; signature: string }>());
+  const dealerHandleCacheRef = useRef(new Map<number, { rank: `0x${string}`[]; suit: `0x${string}`[]; signature: string }>());
+  const playerDecryptBlockedRef = useRef(false);
+  const dealerDecryptBlockedRef = useRef(false);
+  const [connectedDecryptedHandState, setConnectedDecryptedHandState] = useState<CachedDecryptedHand | undefined>(undefined);
 
   const lowerWalletAddress = useMemo(() => toLower(walletAddress), [walletAddress]);
 
-  const playerDecryptedHand = useMemo(() => {
-    if (!walletAddress) return undefined;
-    const key = lowerWalletAddress;
-    if (!key) return undefined;
-    return decryptedHands[key] ?? undefined;
-  }, [walletAddress, decryptedHands, lowerWalletAddress]);
+  useEffect(() => {
+    playerDecryptBlockedRef.current = false;
+    dealerDecryptBlockedRef.current = false;
+  }, [walletAddress]);
 
   const contractAddress = blackjackContract.address;
   const transportType = publicClient?.transport?.type;
@@ -229,20 +261,98 @@ export const useBlackjackGame = (
     return toUiGameState(normalizedTable);
   }, [rawTable]);
 
-  const playerHandSignature = useMemo(() => {
-    if (!baseGameState || !walletAddress) return '0';
-    const lower = toLower(walletAddress);
-    const player = baseGameState.players.find((entry) => toLower(entry.address) === lower);
-    if (!player) return '0';
-    const ids = player.hand.map((card) => card.id).join('|');
-    return `${player.hand.length}:${ids}`;
-  }, [baseGameState, walletAddress]);
+const playerHandSignature = useMemo(() => {
+  if (!baseGameState || !walletAddress) return '0';
+  const lower = toLower(walletAddress);
+  const player = baseGameState.players.find((entry) => toLower(entry.address) === lower);
+  if (!player) return '0';
+  const ids = player.hand.map((card) => card.id).join('|');
+  return `${player.hand.length}:${ids}`;
+}, [baseGameState, walletAddress]);
+
+  const playerDecryptedHand = useMemo(() => {
+    if (!walletAddress) return undefined;
+    const key = lowerWalletAddress;
+    if (!key) return undefined;
+    const entry = decryptedHands[key];
+    if (!entry) return undefined;
+    return entry.signature === playerHandSignature ? entry : undefined;
+  }, [walletAddress, decryptedHands, lowerWalletAddress, playerHandSignature]);
+
+  useEffect(() => {
+  if (playerHandSignature === '0') {
+    playerHandleCacheRef.current.clear();
+    playerDecryptBlockedRef.current = false;
+  }
+}, [playerHandSignature]);
+
+  useEffect(() => {
+    if (!lowerWalletAddress || playerHandSignature === '0') return;
+
+    const player = baseGameState?.players.find(
+      (entry) => toLower(entry.address) === lowerWalletAddress
+    );
+    const canonicalHand = player?.hand ?? [];
+
+    setDecryptedHands((prev) => {
+      const existing = prev[lowerWalletAddress];
+      if (!existing) return prev;
+
+      const sharesPrefix = canonicalHand.length > 0
+        ? existing.cards.every((card, index) => canonicalHand[index]?.id === card.id)
+        : false;
+
+      if (!sharesPrefix) {
+        const next = { ...prev };
+        delete next[lowerWalletAddress];
+        return next;
+      }
+
+      if (existing.signature === playerHandSignature) {
+        return prev;
+      }
+
+      const nextCards = existing.cards.map((card) => ({ ...card }));
+      return {
+        ...prev,
+        [lowerWalletAddress]: {
+          cards: nextCards,
+          total: calculateHandValue(nextCards),
+          signature: playerHandSignature
+        }
+      };
+    });
+
+    if (connectedDecryptedHandState) {
+      const sharesPrefix = canonicalHand.length > 0
+        ? connectedDecryptedHandState.cards.every((card, index) => canonicalHand[index]?.id === card.id)
+        : false;
+
+      if (!sharesPrefix) {
+        setConnectedDecryptedHandState(undefined);
+      } else if (connectedDecryptedHandState.signature !== playerHandSignature) {
+        const nextCards = connectedDecryptedHandState.cards.map((card) => ({ ...card }));
+        setConnectedDecryptedHandState({
+          cards: nextCards,
+          total: calculateHandValue(nextCards),
+          signature: playerHandSignature
+        });
+      }
+    }
+  }, [baseGameState, connectedDecryptedHandState, lowerWalletAddress, playerHandSignature]);
 
   const latestResultTimestamp = useMemo(() => {
     if (!table) return 0;
     const timestamp = Number(table.lastHandResult.timestamp ?? 0n);
     return Number.isFinite(timestamp) ? timestamp : 0;
   }, [table]);
+
+  useEffect(() => {
+    if (latestResultTimestamp === 0) {
+      dealerHandleCacheRef.current.clear();
+      dealerDecryptBlockedRef.current = false;
+    }
+  }, [latestResultTimestamp]);
 
   const showdownPlayerCards = useMemo(() => {
     if (!table) return new Map<string, { cards: Card[]; total: number }>();
@@ -334,6 +444,24 @@ export const useBlackjackGame = (
     const run = async () => {
       if (cancelled) return;
 
+      if (playerDecryptState !== 'pending') {
+        resetPending();
+        clearRetryTimer();
+        return;
+      }
+
+      if (playerDecryptBlockedRef.current) {
+        resetPending();
+        clearRetryTimer();
+        return;
+      }
+
+      if (playerDecryptState === 'error') {
+        resetPending();
+        clearRetryTimer();
+        return;
+      }
+
       if (!walletAddress || !contractAddress || !publicClient || !baseGameState) {
         if (!walletAddress) {
           setDecryptedHands({});
@@ -392,6 +520,7 @@ export const useBlackjackGame = (
         clearRetryTimer();
         if (playerDecryptState !== 'success') {
           setPlayerDecryptState('success');
+          playerDecryptBlockedRef.current = false;
         }
         return;
       }
@@ -435,67 +564,90 @@ export const useBlackjackGame = (
       let suitHandles: `0x${string}`[] = [];
       let handleSignature: string | null = null;
 
-      let fetchError: unknown = null;
-      for (let attempt = 0; attempt < HANDLE_RETRY_LIMIT; attempt++) {
-        if (cancelled) return;
-        console.info('[BlackjackGame] Fetching player encrypted handles', {
-          tableId: tableId.toString(),
-          player: lower,
-          expectedCardCount
-        });
-        try {
-          const response = await publicClient.readContract({
-            ...blackjackContract,
-            functionName: 'getPlayerEncryptedHandles',
-            args: [tableId, walletAddress] as const
+      const cachedHandles = playerHandleCacheRef.current.get(currentHandSignature);
+      if (cachedHandles) {
+        rankHandles = [...cachedHandles.rank];
+        suitHandles = [...cachedHandles.suit];
+        handleSignature = cachedHandles.signature;
+      } else {
+        let fetchError: unknown = null;
+        for (let attempt = 0; attempt < HANDLE_RETRY_LIMIT; attempt++) {
+          if (cancelled) return;
+          console.info('[BlackjackGame] Fetching player encrypted handles', {
+            tableId: tableId.toString(),
+            player: lower,
+            expectedCardCount
           });
+          try {
+            const response = await publicClient.readContract({
+              ...blackjackContract,
+              functionName: 'getPlayerEncryptedHandles',
+              args: [tableId, walletAddress] as const
+            });
 
-          [rankHandles, suitHandles] = response as readonly [`0x${string}`[], `0x${string}`[]];
-          if (Array.isArray(rankHandles) && rankHandles.length > 0) {
-            if (expectedCardCount > 0 && rankHandles.length < expectedCardCount) {
-              console.info('[BlackjackGame] Handle fetch incomplete, retrying', {
-                tableId: tableId.toString(),
-                player: lower,
-                expectedCardCount,
-                fetched: rankHandles.length
-              });
-              rankHandles = [];
-              suitHandles = [];
-            } else {
-              handleSignature = `${tableId.toString()}::${lower}::${rankHandles.join('|')}::${suitHandles.join('|')}`;
-              console.info('[BlackjackGame] Player handles fetched', {
-                tableId: tableId.toString(),
-                player: lower,
-                rankCount: rankHandles.length,
-                suitCount: suitHandles.length,
-                handleSignature
-              });
-              break;
+            [rankHandles, suitHandles] = response as readonly [`0x${string}`[], `0x${string}`[]];
+            if (Array.isArray(rankHandles) && rankHandles.length > 0) {
+              if (expectedCardCount > 0 && rankHandles.length < expectedCardCount) {
+                console.info('[BlackjackGame] Handle fetch incomplete, retrying', {
+                  tableId: tableId.toString(),
+                  player: lower,
+                  expectedCardCount,
+                  fetched: rankHandles.length
+                });
+                rankHandles = [];
+                suitHandles = [];
+              } else {
+                handleSignature = `${tableId.toString()}::${lower}::${rankHandles.join('|')}::${suitHandles.join('|')}`;
+                console.info('[BlackjackGame] Player handles fetched', {
+                  tableId: tableId.toString(),
+                  player: lower,
+                  rankCount: rankHandles.length,
+                  suitCount: suitHandles.length,
+                  handleSignature
+                });
+                playerHandleCacheRef.current.set(currentHandSignature, {
+                  rank: [...rankHandles],
+                  suit: [...suitHandles],
+                  signature: handleSignature
+                });
+                break;
+              }
+            }
+          } catch (error) {
+            fetchError = error;
+            break;
+          }
+
+          if (attempt < HANDLE_RETRY_LIMIT - 1) {
+            await sleep(HANDLE_RETRY_DELAY_MS * (attempt + 1));
+          }
+        }
+
+        if (fetchError) {
+          console.error('[BlackjackGame] Failed to load encrypted handles', fetchError);
+          if (!cancelled) {
+            if (playerDecryptErrorRef.current !== currentHandSignature) {
+              playerDecryptErrorRef.current = currentHandSignature;
+              const rateLimited = isRateLimitError(fetchError);
+              const authIssue = isAuthError(fetchError);
+              const description = authIssue
+                ? 'Your RPC endpoint rejected the request. Add an authenticated URL (API key) to VITE_SEPOLIA_RPC_URL and reconnect.'
+                : rateLimited
+                  ? 'RPC provider rate-limited handle fetches. Waiting before retrying automatically.'
+                  : 'Could not fetch your encrypted card handles from the contract. Check your RPC connection and try again.';
+              toast.error('Encrypted cards unavailable', { description });
+            }
+            failedPlayerHandSignatureRef.current = currentHandSignature;
+            setPlayerDecryptState('error');
+            lastPlayerDecryptErrorAtRef.current = Date.now();
+            if (isAuthError(fetchError)) {
+              playerDecryptBlockedRef.current = true;
             }
           }
-        } catch (error) {
-          fetchError = error;
-          break;
+          resetPending();
+          clearRetryTimer();
+          return;
         }
-
-        if (attempt < HANDLE_RETRY_LIMIT - 1) {
-          await sleep(HANDLE_RETRY_DELAY_MS * (attempt + 1));
-        }
-      }
-
-      if (fetchError) {
-        console.error('[BlackjackGame] Failed to load encrypted handles', fetchError);
-        if (!cancelled) {
-          if (playerDecryptErrorRef.current !== currentHandSignature) {
-            playerDecryptErrorRef.current = currentHandSignature;
-            toast.error('Unable to read encrypted cards. Retry once the network is available.');
-          }
-          failedPlayerHandSignatureRef.current = currentHandSignature;
-          setPlayerDecryptState('error');
-        }
-        resetPending();
-        clearRetryTimer();
-        return;
       }
 
       if (!Array.isArray(rankHandles) || rankHandles.length === 0) {
@@ -532,18 +684,20 @@ export const useBlackjackGame = (
             const cachedCards = cached.cards.map((card) => ({ ...card }));
             setDecryptedHands((prev) => ({
               ...prev,
-              [lower]: { cards: cachedCards, total: cached.total }
+              [lower]: { cards: cachedCards, total: cached.total, signature: currentHandSignature }
             }));
             if (lower === lowerWalletAddress) {
               setConnectedDecryptedHandState({
                 cards: cachedCards.map((card) => ({ ...card })),
-                total: cached.total
+                total: cached.total,
+                signature: currentHandSignature
               });
             }
             playerDecryptErrorRef.current = null;
             setPlayerDecryptState('success');
             lastPlayerHandleSignatureRef.current = handleSignature;
             lastPlayerHandSignatureRef.current = currentHandSignature;
+            playerDecryptBlockedRef.current = false;
           }
           resetPending();
           clearRetryTimer();
@@ -568,14 +722,16 @@ export const useBlackjackGame = (
         })();
 
         if (!signingContext) {
-          console.info('[BlackjackGame] Waiting for wallet provider to authorise decryption');
-          scheduledHandleRetry = true;
+          console.warn('[BlackjackGame] No signing provider available for decryption');
+          playerDecryptErrorRef.current = currentHandSignature;
+          toast.error('Wallet approval required', {
+            description: 'Reconnect your wallet to approve the encryption key before cards can be revealed.'
+          });
+          setPlayerDecryptState('error');
+          lastPlayerDecryptErrorAtRef.current = Date.now();
+          playerDecryptBlockedRef.current = true;
           playerDecryptInFlightRef.current = null;
-          retryTimer = setTimeout(() => {
-            if (!cancelled) {
-              run();
-            }
-          }, HANDLE_RETRY_DELAY_MS * (HANDLE_RETRY_LIMIT + 1));
+          clearRetryTimer();
           return;
         }
 
@@ -647,18 +803,19 @@ export const useBlackjackGame = (
             const nextCards = cards.map((card) => ({ ...card }));
             return {
               ...prev,
-              [lower]: { cards: nextCards, total }
+              [lower]: { cards: nextCards, total, signature: currentHandSignature }
             };
           });
           if (lower === lowerWalletAddress) {
             const stateCards = cards.map((card) => ({ ...card }));
-            setConnectedDecryptedHandState({ cards: stateCards, total });
+            setConnectedDecryptedHandState({ cards: stateCards, total, signature: currentHandSignature });
           }
           playerDecryptErrorRef.current = null;
           failedPlayerHandSignatureRef.current = null;
           setPlayerDecryptState('success');
           lastPlayerHandleSignatureRef.current = handleSignature;
           lastPlayerHandSignatureRef.current = currentHandSignature;
+          playerDecryptBlockedRef.current = false;
           if (handleSignature) {
             playerDecryptCacheRef.current.set(handleSignature, {
               cards: cards.map((card) => ({ ...card })),
@@ -677,7 +834,17 @@ export const useBlackjackGame = (
           });
           if (playerDecryptErrorRef.current !== playerHandSignature) {
             playerDecryptErrorRef.current = playerHandSignature;
-            toast.error('Unable to decrypt your cards. Use the retry control once you have approved the request.');
+            const rateLimited = isRateLimitError(error);
+            const authIssue = isAuthError(error);
+            const networkIssue = isNetworkLikeError(error);
+            const description = authIssue
+              ? 'The relayer call was rejected. Update your RPC credentials or pick a provider that allows eth_call.'
+              : rateLimited
+                ? 'RPC provider rate-limited the decryption request. Waiting before retrying automatically.'
+                : networkIssue
+                  ? 'Unable to reach the decryption relayer. Please ensure your network connection is stable and try again.'
+                  : 'Use the retry control once you have approved the signature request.';
+            toast.error('Card decryption failed', { description });
           }
           console.warn('[BlackjackGame] Player decrypt failed', {
             tableId: tableId.toString(),
@@ -687,6 +854,10 @@ export const useBlackjackGame = (
             error: (error as Error)?.message ?? error
           });
           setPlayerDecryptState('error');
+          lastPlayerDecryptErrorAtRef.current = Date.now();
+          if (isAuthError(error)) {
+            playerDecryptBlockedRef.current = true;
+          }
           lastPlayerHandleSignatureRef.current = null;
           failedPlayerHandSignatureRef.current = currentHandSignature;
           lastPlayerAttemptedSignatureRef.current = currentHandSignature;
@@ -739,6 +910,24 @@ export const useBlackjackGame = (
     const run = async () => {
       if (cancelled) return;
 
+      if (dealerDecryptState !== 'pending') {
+        resetPending();
+        clearRetryTimer();
+        return;
+      }
+
+      if (dealerDecryptBlockedRef.current) {
+        resetPending();
+        clearRetryTimer();
+        return;
+      }
+
+      if (dealerDecryptState === 'error') {
+        resetPending();
+        clearRetryTimer();
+        return;
+      }
+
       if (!contractAddress || !publicClient || !awaitingNextHand || latestResultTimestamp === 0) {
         clearRetryTimer();
         resetPending();
@@ -784,24 +973,67 @@ export const useBlackjackGame = (
       let rankHandles: `0x${string}`[] = [];
       let suitHandles: `0x${string}`[] = [];
       let handleSignature: string | null = null;
+      const cachedDealerHandles = dealerHandleCacheRef.current.get(latestResultTimestamp);
+      if (cachedDealerHandles) {
+        rankHandles = [...cachedDealerHandles.rank];
+        suitHandles = [...cachedDealerHandles.suit];
+        handleSignature = cachedDealerHandles.signature;
+      } else {
+        let fetchError: unknown = null;
 
-      for (let attempt = 0; attempt < HANDLE_RETRY_LIMIT; attempt++) {
-        if (cancelled) return;
+        for (let attempt = 0; attempt < HANDLE_RETRY_LIMIT; attempt++) {
+          if (cancelled) return;
 
-        const response = await publicClient.readContract({
-          ...blackjackContract,
-          functionName: 'getLastDealerEncryptedHandles',
-          args: [tableId] as const
-        });
+          try {
+            const response = await publicClient.readContract({
+              ...blackjackContract,
+              functionName: 'getLastDealerEncryptedHandles',
+              args: [tableId] as const
+            });
 
-        [rankHandles, suitHandles] = response as readonly [`0x${string}`[], `0x${string}`[]];
-        if (Array.isArray(rankHandles) && rankHandles.length > 0) {
-          handleSignature = `${tableId.toString()}::${latestResultTimestamp.toString()}::${rankHandles.join('|')}::${suitHandles.join('|')}`;
-          break;
+            [rankHandles, suitHandles] = response as readonly [`0x${string}`[], `0x${string}`[]];
+            if (Array.isArray(rankHandles) && rankHandles.length > 0) {
+              handleSignature = `${tableId.toString()}::${latestResultTimestamp.toString()}::${rankHandles.join('|')}::${suitHandles.join('|')}`;
+              dealerHandleCacheRef.current.set(latestResultTimestamp, {
+                rank: [...rankHandles],
+                suit: [...suitHandles],
+                signature: handleSignature
+              });
+              break;
+            }
+          } catch (error) {
+            fetchError = error;
+            break;
+          }
+
+          if (attempt < HANDLE_RETRY_LIMIT - 1) {
+            await sleep(HANDLE_RETRY_DELAY_MS * (attempt + 1));
+          }
         }
 
-        if (attempt < HANDLE_RETRY_LIMIT - 1) {
-          await sleep(HANDLE_RETRY_DELAY_MS * (attempt + 1));
+        if (fetchError) {
+          console.error('[BlackjackGame] Failed to load dealer encrypted handles', fetchError);
+          if (!cancelled) {
+            if (dealerDecryptErrorRef.current !== latestResultTimestamp) {
+              dealerDecryptErrorRef.current = latestResultTimestamp;
+              const rateLimited = isRateLimitError(fetchError);
+              const authIssue = isAuthError(fetchError);
+              const description = authIssue
+                ? 'Dealer handle fetch was rejected. Provide an authenticated RPC URL and refresh the table.'
+                : rateLimited
+                  ? 'RPC provider rate-limited dealer handle reads. Waiting before retrying.'
+                  : 'Could not load dealer encrypted cards from the contract. Check the RPC connection and try again.';
+              toast.error('Dealer reveal unavailable', { description });
+            }
+            setDealerDecryptState('error');
+            lastDealerDecryptErrorAtRef.current = Date.now();
+            if (isAuthError(fetchError)) {
+              dealerDecryptBlockedRef.current = true;
+            }
+          }
+          resetPending();
+          clearRetryTimer();
+          return;
         }
       }
 
@@ -821,6 +1053,7 @@ export const useBlackjackGame = (
           lastDealerResultTimestampRef.current = latestResultTimestamp;
           resetPending();
           setDealerDecryptState('success');
+          dealerDecryptBlockedRef.current = false;
           return;
         }
 
@@ -833,6 +1066,7 @@ export const useBlackjackGame = (
             setDealerDecryptState('success');
             lastDealerHandleSignatureRef.current = handleSignature;
             lastDealerResultTimestampRef.current = latestResultTimestamp;
+            dealerDecryptBlockedRef.current = false;
           }
           resetPending();
           clearRetryTimer();
@@ -868,6 +1102,7 @@ export const useBlackjackGame = (
           setDealerDecryptState('success');
           lastDealerHandleSignatureRef.current = handleSignature;
           lastDealerResultTimestampRef.current = latestResultTimestamp;
+          dealerDecryptBlockedRef.current = false;
           if (handleSignature) {
             dealerDecryptCacheRef.current.set(handleSignature, {
               cards: cards.map((card) => ({ ...card })),
@@ -881,9 +1116,25 @@ export const useBlackjackGame = (
           setDealerPublicHand(null);
           if (dealerDecryptErrorRef.current !== latestResultTimestamp) {
             dealerDecryptErrorRef.current = latestResultTimestamp;
-            toast.error('Unable to reveal dealer cards. Retry once the FHE oracle responds.');
+            const errorMessage = (error as Error)?.message ?? 'Unknown error';
+            const rateLimited = isRateLimitError(error);
+            const authIssue = isAuthError(error);
+            const isNetworkIssue =
+              rateLimited || isNetworkLikeError(error) || /relayer|gateway/i.test(errorMessage.toLowerCase());
+            const description = authIssue
+              ? 'Dealer reveal was rejected by the RPC endpoint. Configure an authenticated provider to continue.'
+              : rateLimited
+                ? 'Dealer reveal was rate-limited by your RPC provider. Pausing before the next attempt.'
+                : isNetworkIssue
+                  ? 'Unable to reach the dealer decryption service. Please try again once the relayer is reachable.'
+                  : 'Use the force control if the table is stuck, or retry shortly.';
+            toast.error('Dealer reveal failed', { description });
           }
           setDealerDecryptState('error');
+          lastDealerDecryptErrorAtRef.current = Date.now();
+          if (isAuthError(error)) {
+            dealerDecryptBlockedRef.current = true;
+          }
           lastDealerHandleSignatureRef.current = null;
           lastDealerResultTimestampRef.current = 0;
         }
@@ -947,6 +1198,38 @@ export const useBlackjackGame = (
   }, [table, tableId, latestResultTimestamp]);
 
   useEffect(() => {
+    if (playerDecryptState === 'error' && !playerDecryptBlockedRef.current) {
+      if (!playerDecryptRetryTimeoutRef.current) {
+        const elapsed = Date.now() - lastPlayerDecryptErrorAtRef.current;
+        const delayMs = Math.max(PLAYER_DECRYPT_RETRY_DELAY_MS - Math.max(elapsed, 0), 0);
+        playerDecryptRetryTimeoutRef.current = setTimeout(() => {
+          playerDecryptRetryTimeoutRef.current = null;
+          setPlayerDecryptState((prev) => (prev === 'error' ? 'pending' : prev));
+        }, delayMs > 0 ? delayMs : 1);
+      }
+    } else if (playerDecryptRetryTimeoutRef.current) {
+      clearTimeout(playerDecryptRetryTimeoutRef.current);
+      playerDecryptRetryTimeoutRef.current = null;
+    }
+  }, [playerDecryptState]);
+
+  useEffect(() => {
+    if (dealerDecryptState === 'error' && !dealerDecryptBlockedRef.current) {
+      if (!dealerDecryptRetryTimeoutRef.current) {
+        const elapsed = Date.now() - lastDealerDecryptErrorAtRef.current;
+        const delayMs = Math.max(DEALER_DECRYPT_RETRY_DELAY_MS - Math.max(elapsed, 0), 0);
+        dealerDecryptRetryTimeoutRef.current = setTimeout(() => {
+          dealerDecryptRetryTimeoutRef.current = null;
+          setDealerDecryptState((prev) => (prev === 'error' ? 'pending' : prev));
+        }, delayMs > 0 ? delayMs : 1);
+      }
+    } else if (dealerDecryptRetryTimeoutRef.current) {
+      clearTimeout(dealerDecryptRetryTimeoutRef.current);
+      dealerDecryptRetryTimeoutRef.current = null;
+    }
+  }, [dealerDecryptState]);
+
+  useEffect(() => {
     if (!baseGameState || !lowerWalletAddress) return;
     const player = baseGameState.players.find(
       (entry) => toLower(entry.address) === lowerWalletAddress
@@ -976,11 +1259,19 @@ export const useBlackjackGame = (
 
     const lower = lowerWalletAddress;
     const storedRecord = lower ? decryptedHands[lower] : undefined;
-    const resolvedCount =
-      connectedDecryptedHandState?.cards.length ??
-      playerDecryptedHand?.cards.length ??
-      storedRecord?.cards.length ??
-      0;
+    const currentHandSignature = playerHandSignature;
+    const resolvedCount = (() => {
+      if (connectedDecryptedHandState && connectedDecryptedHandState.signature === currentHandSignature) {
+        return connectedDecryptedHandState.cards.length;
+      }
+      if (playerDecryptedHand) {
+        return playerDecryptedHand.cards.length;
+      }
+      if (storedRecord && storedRecord.signature === currentHandSignature) {
+        return storedRecord.cards.length;
+      }
+      return 0;
+    })();
 
     if (resolvedCount < expectedCardCount) {
       if (connectedDecryptedHandState) {
@@ -990,7 +1281,7 @@ export const useBlackjackGame = (
       failedPlayerHandSignatureRef.current = null;
       lastPlayerHandSignatureRef.current = '0';
       lastPlayerAttemptedSignatureRef.current = '0';
-      if (playerDecryptState !== 'pending') {
+      if (!playerDecryptBlockedRef.current && playerDecryptState !== 'pending') {
         setPlayerDecryptState('pending');
       }
     }
@@ -1000,8 +1291,22 @@ export const useBlackjackGame = (
     decryptedHands,
     lowerWalletAddress,
     playerDecryptedHand,
-    playerDecryptState
+    playerDecryptState,
+    playerHandSignature
   ]);
+
+  useEffect(() => {
+    return () => {
+      if (playerDecryptRetryTimeoutRef.current) {
+        clearTimeout(playerDecryptRetryTimeoutRef.current);
+        playerDecryptRetryTimeoutRef.current = null;
+      }
+      if (dealerDecryptRetryTimeoutRef.current) {
+        clearTimeout(dealerDecryptRetryTimeoutRef.current);
+        dealerDecryptRetryTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const decoratedGameState = useMemo(() => {
     if (!baseGameState) return undefined;
@@ -1010,11 +1315,19 @@ export const useBlackjackGame = (
       const lower = toLower(player.address);
       const isConnectedPlayer = lowerWalletAddress && lower === lowerWalletAddress;
       const showdown = awaitingNextHand ? showdownPlayerCards.get(lower) : undefined;
-      const decryptedSource = isConnectedPlayer
-        ? connectedDecryptedHandState ?? playerDecryptedHand ?? decryptedHands[lower ?? '']
-        : lower
-          ? decryptedHands[lower]
-          : undefined;
+      let decryptedSource: CachedDecryptedHand | undefined;
+      if (isConnectedPlayer) {
+        if (connectedDecryptedHandState && connectedDecryptedHandState.signature === playerHandSignature) {
+          decryptedSource = connectedDecryptedHandState;
+        } else if (playerDecryptedHand) {
+          decryptedSource = playerDecryptedHand;
+        } else if (lower) {
+          const fallback = decryptedHands[lower];
+          decryptedSource = fallback && fallback.signature === playerHandSignature ? fallback : undefined;
+        }
+      } else if (lower) {
+        decryptedSource = decryptedHands[lower];
+      }
 
       const baseHandLength = player.hand.length;
       let displayHand: Card[] = player.displayHand;
@@ -1071,7 +1384,7 @@ export const useBlackjackGame = (
         cardsRevealed: dealerCardsRevealed
       }
     } satisfies GameState;
-  }, [awaitingNextHand, baseGameState, dealerPublicHand, decryptedHands, showdownPlayerCards, lowerWalletAddress, playerDecryptedHand, playerDecryptState, connectedDecryptedHandState]);
+  }, [awaitingNextHand, baseGameState, dealerPublicHand, decryptedHands, showdownPlayerCards, lowerWalletAddress, playerDecryptedHand, connectedDecryptedHandState, playerHandSignature]);
 
   const gameState = decoratedGameState;
 
@@ -1176,6 +1489,7 @@ export const useBlackjackGame = (
     failedPlayerHandSignatureRef.current = null;
     lastPlayerAttemptedSignatureRef.current = '0';
     playerDecryptInFlightRef.current = null;
+    playerDecryptBlockedRef.current = false;
     setPlayerDecryptState('pending');
   }, [walletAddress, contractAddress]);
 

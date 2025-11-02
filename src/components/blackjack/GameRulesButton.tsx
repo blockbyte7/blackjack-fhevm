@@ -40,6 +40,7 @@ export const GameRulesButton = () => {
               <ul className="list-disc space-y-2 pl-5">
                 <li>Place your wager during the betting phase, then two encrypted cards are dealt to each active player and the dealer.</li>
                 <li>On your turn choose <strong>Hit</strong> for another card, <strong>Stand</strong> to hold, or <strong>Double</strong> to double your bet and take one final card.</li>
+                <li>If another player exceeds the on-chain turn timer, the <strong>Force</strong> control becomes available so the table can advance without waiting.</li>
                 <li>If you exceed 21 your hand busts and the bet is forfeited.</li>
               </ul>
             </div>

@@ -332,9 +332,11 @@ export const WalletControls = ({ panel }: WalletControlsProps) => {
               </p>
             </div>
             <div className="grid gap-2">
-              {orderedConnectors.map((connector) => (
+              {orderedConnectors.map((connector, index) => {
+                const key = connector.uid ?? connector.id ?? `${connector.name}-${index}`;
+                return (
                 <Button
-                  key={connector.id}
+                  key={key}
                   onClick={() => handleConnect(connector.id)}
                   disabled={
                     isConnectPending ||
@@ -346,7 +348,8 @@ export const WalletControls = ({ panel }: WalletControlsProps) => {
                   {isConnectPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
                   {connector.name}
                 </Button>
-              ))}
+                );
+              })}
               {!orderedConnectors.length && (
                 <Button
                   onClick={() => handleConnect()}

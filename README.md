@@ -1,6 +1,33 @@
-# CipherJack Blackjack Experience
+# CipherJack Blackjack
 
-A cinematic blackjack table built with React, Vite, Tailwind CSS, and shadcn-ui. The project features polished gameplay state management, animated chip flows.
+CipherJack is an on-chain blackjack table that keeps every card encrypted with fully homomorphic encryption (FHE) until it is safe to reveal. The experience combines a polished UI, responsive chip animations, and wallet-first gameplay for both desktop and mobile (WalletConnect) players.
+
+## Features
+
+- FHE-backed blackjack: cards are dealt and decrypted with user-approved signatures.
+- WalletConnect and injected-wallet support, including mobile-friendly flows.
+- Responsive table that scales up to four players with celebration overlays and chip animations.
+- Built-in safeguards such as the **Force** action for stalled turns and clear status messaging when network services are unavailable.
+
+## Gameplay Overview
+
+1. **Connect & Seat**  
+   Connect an EVM wallet, claim/bring chips, and join a table. All chips live on-chain.
+
+2. **Betting Phase**  
+   Enter a wager and submit it before the hand begins. The UI displays min bet, stack, and available chips.
+
+3. **Encrypted Turns**  
+   Cards are dealt encrypted. Approve the FHE signature request (desktop or WalletConnect) to decrypt your own cards locally.
+
+4. **Actions**  
+   - **Hit** – draw another encrypted card.  
+   - **Stand** – lock your current hand.  
+   - **Double** – double the wager and take exactly one more card (available on the first two cards).  
+   - **Force** – once the on-chain turn timer expires for another player, advance the round without waiting.
+
+5. **Showdown**  
+   Dealer cards decrypt publicly, payouts are calculated on-chain, and the next betting phase opens.
 
 ## Getting Started
 
@@ -11,55 +38,35 @@ npm install
 npm run dev
 ```
 
-The app runs on Vite. Visit the output URL (default: `http://localhost:8080`) to explore the table and subscribe page.
+The app runs on Vite (`http://localhost:8080` by default). Ensure you have the required environment variables for the blackjack contract and FHE relayer before connecting a wallet.
 
-## Available Scripts
+### Available Scripts
 
 - `npm run dev` – start the Vite development server.
 - `npm run build` – generate an optimized production build in `dist/`.
 - `npm run preview` – preview the production build locally.
-
-## Project Structure
-
-- `src/components/blackjack/` – table UI, dealer/player spots, card visuals, chip animations.
-- `src/components/subscribe/` – reusable pieces for the subscribe splash (e.g., the encryption orb).
-- `src/pages/` – route-level components (`Index` for the game, `Subscribe` for the launch splash).
-- `src/hooks/` – blackjack game state logic and helper hooks.
-- `src/assets/` – card, chip, and background artwork.
+- `npm run lint` – run ESLint to verify code quality.
 
 ## Tech Stack
 
 - React + TypeScript
 - Vite
 - Tailwind CSS & shadcn-ui
-- TanStack Query for async state where needed
-
-## Subscribe Route
-
-A `/subscribe` route offers a lightweight "launching soon" page with:
-
-- Fixed marquee banner linking to our X (Twitter) handle.
-- Animated encryption orb centerpiece inspired by secure gameplay.
-- Responsive layout tuned for mobile and desktop.
-
-## Blackjack Table Highlights
-
-- Animated chip stacks for bets, pot accumulation, and payouts.
-- Fireworks and celebration overlay on round win.
-- Responsive grid handling up to four players.
-- Detailed card rendering with custom back designs.
+- Wagmi + viem for wallet and contract interactions
+- TanStack Query for asynchronous state
+- Zama FHE relayer SDK for encrypted card handling
 
 ## Deployment
 
-Use your preferred hosting for Vite/React builds (e.g., Netlify, Vercel, Cloudflare Pages). Build with `npm run build`, then deploy the `dist/` directory.
+Build the project with `npm run build` and deploy the generated `dist/` directory to your preferred static host (Vercel, Netlify, Cloudflare Pages, etc.).
 
 ## Contributing
 
 1. Fork or clone the repository.
 2. Create a feature branch.
-3. Run `npm run lint` (if configured) and `npm run build` before opening a PR.
-4. Submit a pull request describing your changes.
+3. Run `npm run lint` and `npm run build` before opening a PR.
+4. Submit a pull request outlining your changes.
 
 ## License
 
-This project is provided as-is for internal blackjack showcase work. Adapt as needed for your own tables and crypto-enabled experiences.
+This project is provided as-is for internal blackjack showcase work. Adapt it for your own encrypted gaming experiments.

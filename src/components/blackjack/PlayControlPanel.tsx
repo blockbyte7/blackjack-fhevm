@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Hand, PauseCircle, RefreshCcw, Swords } from 'lucide-react';
 
@@ -111,46 +112,68 @@ export const PlayControlPanel = ({
         </div>
 
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-          <Button
-            onClick={onHit}
-            disabled={!connectedCanAct || disableActions || isPending}
-            className={cn(
-              actionButtonBase,
-              'bg-gradient-to-br from-emerald-400 via-emerald-500/90 to-emerald-400/85 text-slate-950 shadow-[0_16px_30px_-20px_rgba(16,185,129,0.75)] hover:from-emerald-300 hover:to-emerald-500'
-            )}
-          >
-            <Hand className="h-4 w-4" /> Hit
-          </Button>
-          <Button
-            onClick={onStand}
-            disabled={!connectedCanAct || disableActions || isPending}
-            className={cn(
-              actionButtonBase,
-              'border-white/20 bg-white/5 text-white hover:border-amber-200/60 hover:bg-white/10'
-            )}
-          >
-            <PauseCircle className="h-4 w-4" /> Stand
-          </Button>
-          <Button
-            onClick={onDouble}
-            disabled={!canDouble || disableActions || isPending}
-            className={cn(
-              actionButtonBase,
-              'bg-gradient-to-br from-indigo-500 via-indigo-500/90 to-indigo-400 text-white shadow-[0_16px_30px_-20px_rgba(99,102,241,0.8)] hover:from-indigo-400 hover:to-indigo-500'
-            )}
-          >
-            <Swords className="h-4 w-4" /> Double
-          </Button>
-          <Button
-            onClick={onForceAdvance}
-            disabled={disableActions || isPending}
-            className={cn(
-              actionButtonBase,
-              'border border-dashed border-amber-300/50 bg-transparent text-amber-200 hover:border-amber-200 hover:bg-amber-400/10'
-            )}
-          >
-            <RefreshCcw className="h-4 w-4" /> Force
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={onHit}
+                disabled={!connectedCanAct || disableActions || isPending}
+                className={cn(
+                  actionButtonBase,
+                  'bg-gradient-to-br from-emerald-400 via-emerald-500/90 to-emerald-400/85 text-slate-950 shadow-[0_16px_30px_-20px_rgba(16,185,129,0.75)] hover:from-emerald-300 hover:to-emerald-500'
+                )}
+              >
+                <Hand className="h-4 w-4" /> Hit
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Draw another encrypted card.</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={onStand}
+                disabled={!connectedCanAct || disableActions || isPending}
+                className={cn(
+                  actionButtonBase,
+                  'border-white/20 bg-white/5 text-white hover:border-amber-200/60 hover:bg-white/10'
+                )}
+              >
+                <PauseCircle className="h-4 w-4" /> Stand
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Lock in your current total and end your turn.</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={onDouble}
+                disabled={!canDouble || disableActions || isPending}
+                className={cn(
+                  actionButtonBase,
+                  'bg-gradient-to-br from-indigo-500 via-indigo-500/90 to-indigo-400 text-white shadow-[0_16px_30px_-20px_rgba(99,102,241,0.8)] hover:from-indigo-400 hover:to-indigo-500'
+                )}
+              >
+                <Swords className="h-4 w-4" /> Double
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Double your wager and take exactly one more card.</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={onForceAdvance}
+                disabled={disableActions || isPending}
+                className={cn(
+                  actionButtonBase,
+                  'border border-dashed border-amber-300/50 bg-transparent text-amber-200 hover:border-amber-200 hover:bg-amber-400/10'
+                )}
+              >
+                <RefreshCcw className="h-4 w-4" /> Force
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              Push the round forward when a player has timed out.
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
