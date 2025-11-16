@@ -98,4 +98,89 @@ describe("Blackjack contract", function () {
         .withArgs(chipsAdded, deposit);
     });
   });
+
+  describe("Table chip management", function () {
+    it("lets seated players top up chips between hands and reclaim them when leaving", async function () {
+      const { blackjack, owner, alice } = await loadFixture(deployFixture);
+      await blackjack.connect(owner).createTable(1_000, 10_000);
+      await blackjack.connect(alice).claimFreeChips();
+      await blackjack.connect(alice).joinTable(1, 4_000);
+
+      const topUpAmount = 1_000;
+      const walletBefore = await blackjack.getPlayerChips(alice.address);
+
+      await expect(blackjack.connect(alice).topUpTableChips(1, topUpAmount))
+        .to.emit(blackjack, "TableChipsToppedUp")
+        .withArgs(1, alice.address, topUpAmount);
+
+      expect(await blackjack.getPlayerChips(alice.address)).to.equal(walletBefore - BigInt(topUpAmount));
+
+      await expect(blackjack.connect(alice).leaveTable(1))
+        .to.emit(blackjack, "PlayerLeft")
+        .withArgs(1, alice.address);
+
+      expect(await blackjack.getPlayerChips(alice.address)).to.equal(10_000);
+      expect(await blackjack.getPlayerTableId(alice.address)).to.equal(0);
+    });
+
+    it("allows players to cash out their stack when no hand is running", async function () {
+      const { blackjack, owner, alice } = await loadFixture(deployFixture);
+      await blackjack.connect(owner).createTable(1_000, 10_000);
+      await blackjack.connect(alice).claimFreeChips();
+      await blackjack.connect(alice).joinTable(1, 6_000);
+
+      await expect(blackjack.connect(alice).cashOut(1))
+        .to.emit(blackjack, "PlayerLeft")
+        .withArgs(1, alice.address);
+
+      expect(await blackjack.getPlayerChips(alice.address)).to.equal(10_000);
+      expect(await blackjack.getPlayerTableId(alice.address)).to.equal(0);
+    });
+
+    it("prevents chip purchases or withdrawals while a player is seated", async function () {
+      const { blackjack, owner, alice } = await loadFixture(deployFixture);
+      await blackjack.connect(owner).createTable(1_000, 10_000);
+      await blackjack.connect(alice).claimFreeChips();
+      await blackjack.connect(alice).joinTable(1, 4_000);
+
+      await expect(blackjack.connect(alice).buyChips({ value: ethers.parseEther("0.1") }))
+        .to.be.revertedWith("Leave table first");
+
+      await expect(blackjack.connect(alice).withdrawChips(1_000))
+        .to.be.revertedWith("Leave table first");
+    });
+  });
+
+  describe("Admin controls", function () {
+    it("blocks gameplay while paused and allows recovery via unpause", async function () {
+      const { blackjack, owner, alice } = await loadFixture(deployFixture);
+      await blackjack.connect(owner).pause();
+      await expect(blackjack.connect(alice).claimFreeChips()).to.be.revertedWith("Paused");
+      await blackjack.connect(owner).unpause();
+      await expect(blackjack.connect(alice).claimFreeChips())
+        .to.emit(blackjack, "FreeChipsClaimed")
+        .withArgs(alice.address, 10_000);
+    });
+
+    it("lets the owner hand off control securely", async function () {
+      const { blackjack, owner, alice } = await loadFixture(deployFixture);
+      await blackjack.connect(owner).transferOwnership(alice.address);
+      await expect(blackjack.connect(owner).pause()).to.be.revertedWith("Only owner");
+      await blackjack.connect(alice).pause();
+      await blackjack.connect(alice).unpause();
+      await blackjack.connect(alice).claimFreeChips();
+      expect(await blackjack.getPlayerChips(alice.address)).to.equal(10_000);
+    });
+
+    it("enforces the MAX_TABLES limit", async function () {
+      const { blackjack, owner } = await loadFixture(deployFixture);
+      const maxTables = Number(await blackjack.MAX_TABLES());
+
+      for (let i = 0; i < maxTables; i++) {
+        await blackjack.connect(owner).createTable(1_000, 10_000);
+      }
+
+      await expect(blackjack.connect(owner).createTable(1_000, 10_000)).to.be.revertedWith("Max tables");
+    });
+  });
 });
