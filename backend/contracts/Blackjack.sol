@@ -12,7 +12,7 @@ pragma solidity ^0.8.20;
  */
 
 import { FHE, ebool, euint8, euint32, externalEuint32 } from "@fhevm/solidity/lib/FHE.sol";
-import { SepoliaConfig } from "@fhevm/solidity/config/ZamaConfig.sol";
+import { SepoliaConfig } from "./SepoliaConfig.sol";
 
 contract Blackjack is SepoliaConfig {
     // ========= Enums & Structs =========
