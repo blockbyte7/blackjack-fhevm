@@ -1,6 +1,6 @@
 # ♠️ CipherJack – Encrypted Blackjack DApp Suite
 
-CipherJack blends a cinematic blackjack experience with Zama's FHEVM so that every card stays private until it is safe to reveal. This repo now tracks the two halves of the product: a polished React frontend for players and a Hardhat-backed smart-contract workspace for builders. The structure and documentation take cues from previous Zama contest winners so reviewers can verify functionality without digging through multiple branches.
+CipherJack blends a cinematic blackjack experience with Zama's FHEVM so that every card stays private until it is safe to reveal. This repo tracks the two halves of the product: a polished React frontend for players and a Hardhat-backed smart-contract workspace for builders.
 
 ## 📚 Contents
 1. [Highlights](#-highlights)
@@ -12,16 +12,14 @@ CipherJack blends a cinematic blackjack experience with Zama's FHEVM so that eve
 7. [Quality & Testing Checklist](#-quality--testing-checklist)
 8. [Deployment Tips](#-deployment-tips)
 9. [Security Notes](#-security--operational-notes)
-10. [Contest Readiness Checklist](#-contest-readiness-checklist)
-11. [Inspiration & References](#-inspiration--references)
-12. [Contributing](#-contributing)
+10. [Contributing](#-contributing)
 
 ## ✨ Highlights
 - **Wallet-first UX** with multi-player lobbies, rich chip interactions, and responsive layouts.
 - **FHE-powered privacy** – encrypted cards are stored on-chain with access controls enforced by Zama coprocessors.
 - **Deterministic payouts** handled entirely in Solidity with configurable table stakes and dealer-bank management.
 - **Full-stack developer ergonomics** thanks to isolated `frontend/` and `backend/` workspaces, shared documentation, and ready-made scripts.
-- **Battle-tested documentation & tests** inspired by Zolymarket, PayProof, and Ratings – making it crystal-clear how Zama primitives are wired up.
+- **Battle-tested documentation & tests** that clearly outline how the encryption workflow operates from Solidity to the UI.
 
 ## 🗂️ Repository Layout
 ```
@@ -29,7 +27,7 @@ blackjack-fhevm/
 ├── backend/                    # Hardhat project for the Blackjack contract
 │   ├── contracts/
 │   │   ├── Blackjack.sol       # Core game logic + chip economy
-│   │   └── SepoliaConfig.sol   # Shim that wires Zama's config into Hardhat
+│   │   └── (inherits ZamaEthereumConfig)   # On-chain wiring to FHEVM hosts
 │   ├── test/
 │   │   └── Blackjack.test.js   # Unit tests for chips, banking, and tables
 │   ├── hardhat.config.js       # Multi-compiler setup with viaIR enabled
@@ -95,8 +93,8 @@ npm run test       # mocha/chai suite via hardhat
 ```
 Key notes:
 - `Hardhat` leverages dual compilers (0.8.24 + 0.8.20) plus `viaIR` to keep the Blackjack bytecode buildable despite its large private-state structs.
-- `SepoliaConfig.sol` is a lightweight adapter that re-exposes the symbol used by the contract while delegating to `ZamaEthereumConfig`.
-- Tests (`test/Blackjack.test.js`) cover the chip economy, table lifecycle, owner-only banking, chip top-ups/cash-outs, seated-player restrictions, pause/unpause, ownership transfer, and the `MAX_TABLES` cap – mirroring the depth of coverage praised in prior contest winners. Extend the suite as you expand gameplay logic (betting flows, timeout enforcement, or encrypted reveals).
+- Contracts now import `ZamaEthereumConfig` directly, mirroring the official migration guide for FHEVM v0.9.
+- Tests (`test/Blackjack.test.js`) cover the chip economy, table lifecycle, owner-only banking, chip top-ups/cash-outs, seated-player restrictions, pause/unpause, ownership transfer, and the `MAX_TABLES` cap. Extend the suite as you expand gameplay logic (betting flows, timeout enforcement, or encrypted reveals).
 
 ## 🔐 Zama FHE Flow (Code Highlights)
 **On-chain encrypted dealing** – every card is mirrored into `euint8` slots and permissioned so only the receiving wallet (plus the contract/relayer) can decrypt.
@@ -167,7 +165,7 @@ const ranks = rankHandles.map((handle) => Number(decrypted[hexlifyHandle(handle)
 const suits = suitHandles.map((handle) => Number(decrypted[hexlifyHandle(handle)]));
 ```
 
-These snippets demonstrate the exact primitives Zama reviewers look for: `FHE.asEuint8` with explicit ACLs on-chain, and `fhe.userDecrypt` fed by relayer-issued keys off-chain.
+These snippets show how the project wires encrypted storage on-chain to decrypted UI output via Zama's SDK (`FHE.asEuint8` with explicit ACLs on-chain and `fhe.userDecrypt` off-chain).
 
 ## 🧪 Quality & Testing Checklist
 - `backend`: `npm run test` – deploys to Hardhat Network and executes unit tests.
@@ -189,19 +187,6 @@ These snippets demonstrate the exact primitives Zama reviewers look for: `FHE.as
 - Always guard the relayer credentials and only expose read-only RPC keys in `.env` files that ship to clients.
 - Bank funds are held in-contract; keep `owner` on a hardware wallet and regularly monitor `bankChips` vs. outstanding wagers.
 - Consider adding more Hardhat tests for reentrancy guards, timeout forcing, and bet settlement edge cases as you iterate.
-
-## 🏆 Contest Readiness Checklist
-- ✅ **Documentation depth:** mirrors the level of detail showcased by Zolymarket, PayProof, and Ratings – complete with diagrams, env tables, and FHE code snippets.
-- ✅ **Test coverage:** critical contract flows (chips, seats, admin ops) automated via Hardhat; extend with integration tests as gameplay expands.
-- ✅ **Clear setup:** deterministic scripts for both workspaces plus explicit env guidance so judges can run everything locally.
-- ✅ **Security posture:** pause/ownership controls highlighted, with recommendations on relayer secrets and dealer-bank monitoring.
-
-Deliverables in this repo map directly to judging rubrics: privacy enforcement is explained, and every operational edge (chips, tables, pausing) has at least one reproducible test.
-
-## 🌱 Inspiration & References
-- [Farukest/Zolymarket](https://github.com/Farukest/Zolymarket/) – comprehensive doc culture for Zama FHE projects.
-- [mintychan/PayProof](https://github.com/mintychan/PayProof) – strong focus on relayer tooling and audits.
-- [dordunu1/Ratings](https://github.com/dordunu1/Ratings) – excellent README storytelling that inspired our own structure.
 
 ## 🤝 Contributing
 1. Fork & clone the repo.

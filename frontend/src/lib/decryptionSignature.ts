@@ -23,6 +23,15 @@ type StorageProvider = {
   removeItem: (key: string) => void;
 };
 
+const sanitizeTypes = (
+  types?: Record<string, Array<{ name: string; type: string }>>
+): Record<string, Array<{ name: string; type: string }>> => {
+  if (!types) {
+    return {};
+  }
+  return Object.fromEntries(Object.entries(types).filter(([typeName]) => typeName !== 'EIP712Domain'));
+};
+
 const resolveStorage = (): StorageProvider => {
   if (typeof window !== 'undefined' && window.localStorage) {
     return window.localStorage;
@@ -59,7 +68,8 @@ export const loadOrCreateSignature = async (
   let signTypedData: (
     domain: Record<string, unknown>,
     types: Record<string, Array<{ name: string; type: string }>>,
-    message: Record<string, unknown>
+    message: Record<string, unknown>,
+    primaryType?: string
   ) => Promise<string>;
 
   if ('browserProvider' in context && context.browserProvider) {
@@ -82,13 +92,16 @@ export const loadOrCreateSignature = async (
       throw new Error('Wallet client does not have an active account to sign typed data.');
     }
     userAddress = accountAddress as `0x${string}`;
-    signTypedData = async (domain, types, message) => {
-      const { EIP712Domain, ...viemTypes } = types;
+    signTypedData = async (domain, types, message, primaryType) => {
+      const sanitizedTypesEntries = Object.entries(types ?? {}).filter(([typeName]) => typeName !== 'EIP712Domain');
+      const sanitizedTypes = Object.fromEntries(sanitizedTypesEntries) as Record<string, { name: string; type: string }[]>;
       return client.signTypedData({
         account: accountAddress,
         domain,
-        primaryType: 'UserDecryptRequestVerification',
-        types: viemTypes,
+        primaryType: (primaryType ?? 'UserDecryptRequestVerification') as
+          | 'UserDecryptRequestVerification'
+          | 'DelegatedUserDecryptRequestVerification',
+        types: sanitizedTypes,
         message
       }) as unknown as Promise<string>;
     };
@@ -122,11 +135,13 @@ export const loadOrCreateSignature = async (
   const contractAddresses = [contractAddress];
 
   const eip712 = instance.createEIP712(publicKey, contractAddresses, startTimestamp, durationDays);
+  const sanitizedTypes = sanitizeTypes(eip712.types as Record<string, Array<{ name: string; type: string }>>);
 
   const signature = await signTypedData(
     eip712.domain as Record<string, unknown>,
-    eip712.types as Record<string, Array<{ name: string; type: string }>>,
-    eip712.message as Record<string, unknown>
+    sanitizedTypes,
+    eip712.message as Record<string, unknown>,
+    eip712.primaryType as string | undefined
   );
 
   const record: StoredDecryptionSignature = {
@@ -146,4 +161,9 @@ export const loadOrCreateSignature = async (
   }
 
   return record;
+};
+
+export const invalidateStoredSignature = (contractAddress: `0x${string}`, userAddress: `0x${string}`) => {
+  const storage = resolveStorage();
+  storage.removeItem(signatureStorageKey(userAddress, contractAddress));
 };

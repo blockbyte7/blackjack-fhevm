@@ -12,9 +12,9 @@ pragma solidity ^0.8.20;
  */
 
 import { FHE, ebool, euint8, euint32, externalEuint32 } from "@fhevm/solidity/lib/FHE.sol";
-import { SepoliaConfig } from "./SepoliaConfig.sol";
+import { ZamaEthereumConfig } from "@fhevm/solidity/config/ZamaConfig.sol";
 
-contract Blackjack is SepoliaConfig {
+contract Blackjack is ZamaEthereumConfig {
     // ========= Enums & Structs =========
     enum TableStatus { Waiting, Active, Closed }
     enum GamePhase { WaitingForPlayers, Dealing, PlayerTurns, DealerTurn, Showdown, Completed }

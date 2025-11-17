@@ -63,7 +63,7 @@ export default defineConfig(({ mode }) => ({
     include: ["util", "buffer", "process", "stream-browserify"],
     esbuildOptions: {
       loader: {
-        ".wasm": "file",
+        ".wasm": "binary",
       },
       define: {
         global: "globalThis",

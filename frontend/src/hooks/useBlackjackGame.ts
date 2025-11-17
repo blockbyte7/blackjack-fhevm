@@ -23,7 +23,11 @@ import {
   calculateHandValue
 } from '@/utils/contractMapping';
 import { ensureFhevmInstance, getBrowserProvider, hexlifyHandle } from '@/lib/fhevm';
-import { loadOrCreateSignature } from '@/lib/decryptionSignature';
+import {
+  loadOrCreateSignature,
+  invalidateStoredSignature,
+  type StoredDecryptionSignature
+} from '@/lib/decryptionSignature';
 
 const DEFAULT_TABLE_ID = 1n;
 const TABLE_POLL_INTERVAL = 15_000;
@@ -59,6 +63,17 @@ const isNetworkLikeError = (error: unknown): boolean => {
   const message = messageFromError(error).toLowerCase();
   if (!message) return false;
   return /fetch|network|timeout|offline|relayer|gateway|disconnect/i.test(message);
+};
+
+const shouldResetDecryptSignature = (error: unknown): boolean => {
+  const message = messageFromError(error).toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes('user decrypt failed') ||
+    message.includes('invalid signature') ||
+    message.includes('kms') ||
+    message.includes('500')
+  );
 };
 
 const sleep = (ms: number) => new Promise<void>((resolve) => {
@@ -706,6 +721,7 @@ const playerHandSignature = useMemo(() => {
       }
 
       let scheduledHandleRetry = false;
+      let activeSignature: StoredDecryptionSignature | null = null;
       try {
         const fhe = await ensureFhevmInstance();
 
@@ -740,6 +756,7 @@ const playerHandSignature = useMemo(() => {
           contractAddress as `0x${string}`,
           signingContext
         );
+        activeSignature = signature;
 
         const queries = [...rankHandles, ...suitHandles].map((handle) => ({
           handle: hexlifyHandle(handle),
@@ -832,6 +849,12 @@ const playerHandSignature = useMemo(() => {
             delete next[lower];
             return next;
           });
+          if (activeSignature && shouldResetDecryptSignature(error)) {
+            const contractForSignature = activeSignature.contractAddresses[0];
+            if (contractForSignature) {
+              invalidateStoredSignature(contractForSignature, activeSignature.userAddress);
+            }
+          }
           if (playerDecryptErrorRef.current !== playerHandSignature) {
             playerDecryptErrorRef.current = playerHandSignature;
             const rateLimited = isRateLimitError(error);
