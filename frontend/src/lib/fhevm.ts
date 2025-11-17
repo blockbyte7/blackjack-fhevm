@@ -2,7 +2,7 @@ import { initSDK, createInstance, type FhevmInstance } from '@zama-fhe/relayer-s
 import { BrowserProvider, ethers } from 'ethers';
 
 const TARGET_CHAIN_ID = Number(import.meta.env.VITE_FHE_TARGET_CHAIN_ID ?? 11155111);
-const GATEWAY_CHAIN_ID = Number(import.meta.env.VITE_FHE_GATEWAY_CHAIN_ID ?? 55815);
+const GATEWAY_CHAIN_ID = Number(import.meta.env.VITE_FHE_GATEWAY_CHAIN_ID ?? 10901);
 const RELAYER_URL = import.meta.env.VITE_FHE_RELAYER_URL ?? '';
 const RPC_URL = import.meta.env.VITE_FHE_RPC_URL ?? '';
 const ACL_CONTRACT_ADDRESS = import.meta.env.VITE_FHE_ACL_ADDRESS ?? '';

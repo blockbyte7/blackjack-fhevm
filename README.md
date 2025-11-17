@@ -78,6 +78,8 @@ The UI expects the following environment variables (create `frontend/.env`):
 | `VITE_FHE_TARGET_CHAIN_ID` / `VITE_FHE_GATEWAY_CHAIN_ID` | FHEVM target & gateway chain IDs |
 | `VITE_FHE_RELAYER_URL` / `VITE_FHE_RPC_URL` | Relayer + RPC endpoints for encrypted ops |
 | `VITE_FHE_ACL_ADDRESS`, `VITE_FHE_KMS_ADDRESS`, `VITE_FHE_INPUT_VERIFIER_ADDRESS`, `VITE_FHE_INPUT_VERIFICATION_ADDRESS`, `VITE_FHE_DECRYPTION_ORACLE_ADDRESS` | Addresses supplied by the Zama coprocessor deployment |
+
+> Sepolia + FHEVM v0.9 currently use `RELAYER_URL=https://relayer.testnet.zama.org`, `GATEWAY_CHAIN_ID=10901`, `ACL=0xf0Ffdc93b7E186bC2f8CB3dAA75D86d1930A433D`, `KMS=0xbE0E383937d564D7FF0BC3b46c51f0bF8d5C311A`, `INPUT_VERIFIER=0xBBC1fFCdc7C316aAAd72E807D9b0272BE8F84DA0`, `DECRYPTION_ORACLE=0x5D8BD78e2ea6bbE41f26dFe9fdaEAa349e077478`, and `INPUT_VERIFICATION=0x483b9dE06E4E4C7D35CCf5837A1668487406D955`.
 | `VITE_APP_PUBLIC_URL` / `VITE_APP_ICON_URL` | Metadata used by Wagmi connectors |
 | `VITE_SEPOLIA_RPC_URL` | Public RPC for wagmi’s chain config |
 | `VITE_WALLETCONNECT_PROJECT_ID` | WalletConnect Cloud project identifier |
